@@ -1,0 +1,17 @@
+version: "3.9"
+
+services:
+  stock_manager_bot:
+    build: .
+    image: stock-manager-bot:latest
+    container_name: stock_manager_bot
+    env_file:
+      - .env
+    environment:
+      STOCK_BOT_DB_PATH: /app/data/stock_manager.sqlite3
+    volumes:
+      - ./data:/app/data
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    restart: unless-stopped

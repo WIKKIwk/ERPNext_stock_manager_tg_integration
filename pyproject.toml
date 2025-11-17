@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stock-manager-bot"
+version = "0.1.0"
+description = "Telegram bot for ERPNext stock managers"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "python-telegram-bot[rate-limiter]>=21.2",
+    "requests>=2.32",
+    "python-dotenv>=1.0",
+]
+
+[tool.setuptools]
+packages = ["stock_manager_bot"]

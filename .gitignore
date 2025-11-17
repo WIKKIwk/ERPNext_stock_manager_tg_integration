@@ -1,0 +1,32 @@
+# Python artefacts
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Packaging / build outputs
+build/
+dist/
+*.egg-info/
+
+# Editor / tooling cruft
+.idea/
+.vscode/
+*.swp
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Local databases and data dumps
+*.sqlite
+*.sqlite3
+*.db
+
+# Docker volumes
+data/
