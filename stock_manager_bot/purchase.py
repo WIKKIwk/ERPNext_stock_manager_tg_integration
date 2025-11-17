@@ -245,6 +245,29 @@ class PurchaseFlowMixin:
             ]
         )
 
+    def _purchase_action_buttons(self, detail: Dict[str, Any]) -> Optional[InlineKeyboardMarkup]:
+        docname = detail.get("name")
+        if not docname:
+            return None
+        docstatus = detail.get("docstatus")
+        buttons: list[list[InlineKeyboardButton]] = []
+        if docstatus == 0:
+            buttons.append(
+                [
+                    InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"{PURCHASE_APPROVE_PREFIX}:{docname}"),
+                    InlineKeyboardButton("🗑️ O'chirish", callback_data=f"{PURCHASE_DELETE_PREFIX}:{docname}"),
+                ]
+            )
+        elif docstatus == 1:
+            buttons.append(
+                [InlineKeyboardButton("❌ Bekor qilish", callback_data=f"{PURCHASE_CANCEL_PREFIX}:{docname}")]
+            )
+        else:
+            buttons.append(
+                [InlineKeyboardButton("🗑️ O'chirish", callback_data=f"{PURCHASE_DELETE_PREFIX}:{docname}")]
+            )
+        return InlineKeyboardMarkup(buttons)
+
     async def _prompt_purchase_items_menu(
         self,
         *,

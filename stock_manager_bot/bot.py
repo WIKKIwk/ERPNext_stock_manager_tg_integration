@@ -13,6 +13,7 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InlineQueryResultArticle,
+    InlineQueryResultsButton,
     InputTextMessageContent,
     ReplyKeyboardMarkup,
     Update,
@@ -215,6 +216,11 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
             resize_keyboard=True,
             one_time_keyboard=False,
         )
+
+    @staticmethod
+    def _inline_start_button(text: str) -> InlineQueryResultsButton:
+        label = (text or "Botni ochish").strip() or "Botni ochish"
+        return InlineQueryResultsButton(text=label[:48], start_parameter="start")
 
     def _entry_markup(self) -> InlineKeyboardMarkup:
         view_button = InlineKeyboardButton(
@@ -1477,8 +1483,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                 [],
                 is_personal=True,
                 cache_time=3,
-                switch_pm_text="Avval /start ni bosing",
-                switch_pm_parameter="start",
+                button=self._inline_start_button("Avval /start ni bosing"),
             )
             return
 
@@ -1521,8 +1526,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                     [],
                     is_personal=True,
                     cache_time=3,
-                    switch_pm_text=hint[:48],
-                    switch_pm_parameter="start",
+                    button=self._inline_start_button(hint[:48]),
                 )
                 return
 
@@ -1566,8 +1570,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                     [],
                     is_personal=True,
                     cache_time=3,
-                    switch_pm_text=hint[:48],
-                    switch_pm_parameter="start",
+                    button=self._inline_start_button(hint[:48]),
                 )
                 return
             results = []
@@ -1611,8 +1614,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                     [],
                     is_personal=True,
                     cache_time=3,
-                    switch_pm_text=hint[:48],
-                    switch_pm_parameter="start",
+                    button=self._inline_start_button(hint[:48]),
                 )
                 return
             results = []
@@ -1656,8 +1658,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                     [],
                     is_personal=True,
                     cache_time=3,
-                    switch_pm_text=hint[:48],
-                    switch_pm_parameter="start",
+                    button=self._inline_start_button(hint[:48]),
                 )
                 return
             results = []
@@ -1703,8 +1704,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                     [],
                     is_personal=True,
                     cache_time=3,
-                    switch_pm_text=hint[:48],
-                    switch_pm_parameter="start",
+                    button=self._inline_start_button(hint[:48]),
                 )
                 return
             results = []
@@ -1751,8 +1751,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                     [],
                     is_personal=True,
                     cache_time=3,
-                    switch_pm_text=hint[:48],
-                    switch_pm_parameter="start",
+                    button=self._inline_start_button(hint[:48]),
                 )
                 return
             results = []
@@ -1799,8 +1798,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                     [],
                     is_personal=True,
                     cache_time=3,
-                    switch_pm_text=hint[:48],
-                    switch_pm_parameter="start",
+                    button=self._inline_start_button(hint[:48]),
                 )
                 return
             results = []
@@ -1843,8 +1841,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                     [],
                     is_personal=True,
                     cache_time=3,
-                    switch_pm_text=hint[:48],
-                    switch_pm_parameter="start",
+                    button=self._inline_start_button(hint[:48]),
                 )
                 return
             results = []
@@ -1887,8 +1884,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                     [],
                     is_personal=True,
                     cache_time=3,
-                    switch_pm_text=hint[:48],
-                    switch_pm_parameter="start",
+                    button=self._inline_start_button(hint[:48]),
                 )
                 return
 
@@ -1934,8 +1930,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                     [],
                     is_personal=True,
                     cache_time=3,
-                    switch_pm_text=hint[:48],
-                    switch_pm_parameter="start",
+                    button=self._inline_start_button(hint[:48]),
                 )
                 return
             results = []
@@ -1982,8 +1977,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                     [],
                     is_personal=True,
                     cache_time=3,
-                    switch_pm_text=hint[:48],
-                    switch_pm_parameter="start",
+                    button=self._inline_start_button(hint[:48]),
                 )
                 return
             results = []
@@ -2026,8 +2020,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                     [],
                     is_personal=True,
                     cache_time=3,
-                    switch_pm_text=hint[:48],
-                    switch_pm_parameter="start",
+                    button=self._inline_start_button(hint[:48]),
                 )
                 return
             results = []
@@ -2071,8 +2064,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                 [],
                 is_personal=True,
                 cache_time=3,
-                switch_pm_text=hint[:48],
-                switch_pm_parameter="start",
+                button=self._inline_start_button(hint[:48]),
             )
             return
 
