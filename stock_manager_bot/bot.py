@@ -41,6 +41,7 @@ from .purchase import (
     PURCHASE_APPROVE_PREFIX,
     PURCHASE_CANCEL_PREFIX,
     PURCHASE_DELETE_PREFIX,
+    PURCHASE_DISMISS_PREFIX,
     PURCHASE_CONFIRM_CALLBACK,
     PURCHASE_APPROVE_QUERY_PREFIXES,
 )
@@ -54,6 +55,7 @@ from .delivery import (
     DELIVERY_APPROVE_PREFIX,
     DELIVERY_CANCEL_PREFIX,
     DELIVERY_DELETE_PREFIX,
+    DELIVERY_DISMISS_PREFIX,
     DELIVERY_CONFIRM_CALLBACK,
     DELIVERY_APPROVE_QUERY_PREFIXES,
 )
@@ -68,6 +70,7 @@ ENTRY_CANCEL_PREFIX = "entry-cancel"
 ENTRY_DELETE_PREFIX = "entry-delete"
 ENTRY_CREATE_PREFIX = "entrycreate"
 ENTRY_APPROVE_QUERY_PREFIXES = ("entryapprove", "approve")
+ENTRY_DISMISS_PREFIX = "entry-dismiss"
 ENTRY_TYPE_OPTIONS = {
     "receipt": {
         "label": "Material kiridi",
@@ -80,6 +83,9 @@ ENTRY_TYPE_OPTIONS = {
         "warehouse_role": "source",
     },
 }
+
+FORMALIZE_INCOMING_CALLBACK = "formalize:incoming"
+FORMALIZE_OUTGOING_CALLBACK = "formalize:outgoing"
 
 
 class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
@@ -111,6 +117,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
         app.add_handler(CommandHandler("entry", self.handle_entry_command))
         app.add_handler(CommandHandler("purchase", self.handle_purchase_command))
         app.add_handler(CommandHandler("delivery", self.handle_delivery_command))
+        app.add_handler(CommandHandler("apic", self.handle_clear_command))
         app.add_handler(CommandHandler("clear", self.handle_clear_command))
         app.add_handler(CommandHandler("cancel", self.handle_cancel_command))
         app.add_handler(
@@ -131,6 +138,9 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
             CallbackQueryHandler(self.handle_entry_creation_callback, pattern=r"^entrycreate:")
         )
         app.add_handler(
+            CallbackQueryHandler(self.handle_formalize_callback, pattern=r"^formalize:")
+        )
+        app.add_handler(
             CallbackQueryHandler(self.handle_purchase_create_callback, pattern=r"^purchase:create$")
         )
         app.add_handler(
@@ -147,6 +157,9 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
         )
         app.add_handler(
             CallbackQueryHandler(self.handle_purchase_delete_action, pattern=rf"^{PURCHASE_DELETE_PREFIX}:")
+        )
+        app.add_handler(
+            CallbackQueryHandler(self.handle_purchase_dismiss_action, pattern=rf"^{PURCHASE_DISMISS_PREFIX}:")
         )
         app.add_handler(
             CallbackQueryHandler(self.handle_delivery_create_callback, pattern=r"^delivery:create$")
@@ -167,6 +180,9 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
             CallbackQueryHandler(self.handle_delivery_delete_action, pattern=rf"^{DELIVERY_DELETE_PREFIX}:")
         )
         app.add_handler(
+            CallbackQueryHandler(self.handle_delivery_dismiss_action, pattern=rf"^{DELIVERY_DISMISS_PREFIX}:")
+        )
+        app.add_handler(
             CallbackQueryHandler(self.handle_entry_confirm_callback, pattern=r"^entry:confirm$")
         )
         app.add_handler(
@@ -177,6 +193,9 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
         )
         app.add_handler(
             CallbackQueryHandler(self.handle_entry_delete_callback, pattern=rf"^{ENTRY_DELETE_PREFIX}:")
+        )
+        app.add_handler(
+            CallbackQueryHandler(self.handle_entry_dismiss_callback, pattern=rf"^{ENTRY_DISMISS_PREFIX}:")
         )
         app.add_error_handler(self.handle_error)
 
@@ -202,19 +221,36 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
         logger.info("event=%s user=%s %s", action, user_id or "-", details.strip())
 
     def _items_markup(self) -> InlineKeyboardMarkup:
-        label = "📦 Itemlarni ko'rish"
+        label = "📦 Buyumlarni ko'rish"
         button = InlineKeyboardButton(label, switch_inline_query_current_chat="items")
         return InlineKeyboardMarkup([[button]])
 
     def _main_menu_markup(self) -> ReplyKeyboardMarkup:
         return ReplyKeyboardMarkup(
             [
-                ["📦 Itemlar", "📋 Harakatlar"],
-                ["🧾 Purchase Receipt", "🚚 Delivery Note"],
-                ["♻️ API ni tozalash"],
+                ["📦 Buyumlar", "📋 Harakatlar"],
+                ["📝 Rasmiylashtirish"],
             ],
             resize_keyboard=True,
             one_time_keyboard=False,
+        )
+
+    def _formalization_options_markup(self) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "📥 Kirgan mahsulotni rasmiylashtirish",
+                        callback_data=FORMALIZE_INCOMING_CALLBACK,
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "📤 Chiqqan mahsulotni rasmiylashtirish",
+                        callback_data=FORMALIZE_OUTGOING_CALLBACK,
+                    )
+                ],
+            ]
         )
 
     @staticmethod
@@ -223,16 +259,13 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
         return InlineQueryResultsButton(text=label[:48], start_parameter="start")
 
     def _entry_markup(self) -> InlineKeyboardMarkup:
-        view_button = InlineKeyboardButton(
-            "📋 Harakatni ko'rish", switch_inline_query_current_chat=ENTRY_TRIGGER
-        )
         create_button = InlineKeyboardButton(
             "➕ Yangi harakat yaratish", callback_data=ENTRY_CALLBACK_CREATE
         )
         confirm_button = InlineKeyboardButton(
             "✔️ Harakatni tasdiqlash", callback_data="entry:confirm"
         )
-        return InlineKeyboardMarkup([[view_button], [create_button], [confirm_button]])
+        return InlineKeyboardMarkup([[create_button], [confirm_button]])
 
     def _cancel_creation_button(self, prefix: str = ENTRY_CREATE_PREFIX) -> InlineKeyboardButton:
         return InlineKeyboardButton(
@@ -252,6 +285,97 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
     def _docstatus_label(value: Optional[int]) -> str:
         mapping = {0: "Draft", 1: "Tasdiqlangan", 2: "Bekor qilingan"}
         return mapping.get(value, "Noma'lum")
+
+    @staticmethod
+    def _entry_type_display(value: Optional[str]) -> str:
+        mapping = {
+            "Material Receipt": "Kirim",
+            "Material Issue": "Chiqim",
+        }
+        if not value:
+            return "-"
+        return mapping.get(value, value)
+
+    @staticmethod
+    def _transliterate_cyrillic(value: str) -> str:
+        table = str.maketrans(
+            {
+                "а": "a",
+                "б": "b",
+                "в": "v",
+                "г": "g",
+                "ғ": "g'",
+                "д": "d",
+                "е": "e",
+                "ё": "yo",
+                "ж": "j",
+                "з": "z",
+                "и": "i",
+                "й": "y",
+                "к": "k",
+                "қ": "q",
+                "л": "l",
+                "м": "m",
+                "н": "n",
+                "о": "o",
+                "ў": "o'",
+                "п": "p",
+                "р": "r",
+                "с": "s",
+                "т": "t",
+                "у": "u",
+                "ф": "f",
+                "х": "h",
+                "ҳ": "h",
+                "ч": "ch",
+                "ш": "sh",
+                "щ": "sch",
+                "ъ": "",
+                "ы": "i",
+                "ь": "",
+                "э": "e",
+                "ю": "yu",
+                "я": "ya",
+                "ё": "yo",
+                "А": "A",
+                "Б": "B",
+                "В": "V",
+                "Г": "G",
+                "Ғ": "G'",
+                "Д": "D",
+                "Е": "E",
+                "Ё": "Yo",
+                "Ж": "J",
+                "З": "Z",
+                "И": "I",
+                "Й": "Y",
+                "К": "K",
+                "Қ": "Q",
+                "Л": "L",
+                "М": "M",
+                "Н": "N",
+                "О": "O",
+                "Ў": "O'",
+                "П": "P",
+                "Р": "R",
+                "С": "S",
+                "Т": "T",
+                "У": "U",
+                "Ф": "F",
+                "Х": "H",
+                "Ҳ": "H",
+                "Ч": "Ch",
+                "Ш": "Sh",
+                "Щ": "Sch",
+                "Ъ": "",
+                "Ы": "I",
+                "Ь": "",
+                "Э": "E",
+                "Ю": "Yu",
+                "Я": "Ya",
+            }
+        )
+        return value.translate(table)
 
     @staticmethod
     def _parse_warehouse_inline(text: str) -> Optional[Dict[str, str]]:
@@ -297,7 +421,8 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
             docname = row.get("name")
             if not docname:
                 continue
-            purpose = row.get("purpose") or row.get("stock_entry_type") or "-"
+            purpose_raw = row.get("purpose") or row.get("stock_entry_type")
+            purpose = self._entry_type_display(purpose_raw)
             label = f"{docname} ({purpose})"
             buttons.append([InlineKeyboardButton(label[:60], callback_data=f"entry-detail:{docname}")])
         if not buttons:
@@ -314,19 +439,19 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
     ) -> None:
         success, error_detail, rows = await self._fetch_items(api_key, api_secret, query="")
         if not success:
-            text = "Item ro'yxatini olishda xatolik yuz berdi."
+            text = "Buyumlar ro'yxatini olishda xatolik yuz berdi."
             if error_detail:
                 text += f"\nMa'lumot: {error_detail}"
             await context.bot.send_message(chat_id=chat_id, text=text)
             return
         if not rows:
-            await context.bot.send_message(chat_id=chat_id, text="ERPNext da item topilmadi.")
+            await context.bot.send_message(chat_id=chat_id, text="ERPNext da buyum topilmadi.")
             return
         button = InlineKeyboardMarkup(
             [
                 [
                     InlineKeyboardButton(
-                        "📦 Item oynasini ochish",
+                        "📦 Buyum oynasini ochish",
                         switch_inline_query_current_chat="itemlookup",
                     )
                 ]
@@ -334,7 +459,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
         )
         await context.bot.send_message(
             chat_id=chat_id,
-            text="Item tanlash uchun pastdagi qidiruv oynasini oching.",
+            text="Buyum tanlash uchun pastdagi qidiruv oynasini oching.",
             reply_markup=button,
         )
 
@@ -369,7 +494,8 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
         lines = []
         for row in preview:
             name = row.get("name") or "-"
-            purpose = row.get("purpose") or row.get("stock_entry_type") or "-"
+            purpose_raw = row.get("purpose") or row.get("stock_entry_type")
+            purpose = self._entry_type_display(purpose_raw)
             posting = row.get("posting_date") or "-"
             warehouses = f"{row.get('from_warehouse') or '-'} → {row.get('to_warehouse') or '-'}"
             status = self._docstatus_label(row.get("docstatus"))
@@ -395,7 +521,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
         await context.bot.send_message(
             chat_id=chat_id,
             text=(
-                f"📄 Yangi Stock Entry seriyasi: {draft['series']}\n"
+                f"📄 Yangi harakat seriyasi raqami: {draft['series']}\n"
                 "Iltimos, harakat turini tanlang."
                 "\nJarayonni to'xtatish uchun 'Bekor qilish' tugmasidan foydalanishingiz mumkin."
             ),
@@ -411,7 +537,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
         notice: Optional[str] = None,
     ) -> None:
         self.storage.delete_entry_draft(user_id)
-        message = notice or "Yangi Stock Entry jarayoni bekor qilindi."
+        message = notice or "Yangi harakat jarayoni bekor qilindi."
         await context.bot.send_message(chat_id=chat_id, text=message)
 
     async def _prompt_entry_type(self, *, chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -448,7 +574,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
             [
                 [
                     InlineKeyboardButton(
-                        "📦 Item oynasini ochish", switch_inline_query_current_chat="entryitem "
+                        "📦 Buyum oynasini ochish", switch_inline_query_current_chat="entryitem "
                     )
                 ],
                 [self._cancel_creation_button()],
@@ -457,7 +583,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
         await context.bot.send_message(
             chat_id=chat_id,
             text=(
-                "Qaysi item keldi/ketyapti?\n"
+                "Qaysi buyum keldi/ketyapti?\n"
                 "Inline menyudan tanlagach xabar shu chatda paydo bo'ladi."
             ),
             reply_markup=button,
@@ -508,10 +634,15 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         if not lines:
             await message.reply_text(
-                "Inline menyudan item tanlab shu chatga yuboring. Xabar tarkibida \"Item Code:\" bo'lishi kerak."
+                "Inline menyudan buyum tanlab shu chatga yuboring. Xabar tarkibida \"Buyum kodi:\" bo'lishi kerak."
             )
             return True
-        if not any("item code" in line.lower() or "#entryitem" in line.lower() for line in lines):
+        if not any(
+            "item code" in line.lower()
+            or "buyum kodi" in line.lower()
+            or "#entryitem" in line.lower()
+            for line in lines
+        ):
             return False
         code = None
         name = None
@@ -520,7 +651,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
             if line.startswith("📦"):
                 name = line.lstrip("📦").strip()
             lowered = line.lower()
-            if lowered.startswith("item code:"):
+            if lowered.startswith("item code:") or lowered.startswith("buyum kodi:"):
                 code = line.split(":", 1)[1].strip()
             if lowered.startswith("uom:"):
                 uom = line.split(":", 1)[1].strip()
@@ -650,17 +781,35 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
         )
         if success:
             self.storage.delete_entry_draft(user_id)
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=(
-                    "✅ Stock Entry yaratildi.\n"
-                    f"Nom: {docname or 'ERPNext'}\n"
-                    f"Tur: {draft.get('entry_type_label')}\n"
-                    f"Item: {item.get('name')} ({item.get('code')})\n"
-                    f"Ombor: {warehouse}\n"
-                    f"Miqdor: {qty}"
-                ),
-            )
+            detail_success = False
+            detail = {}
+            if docname:
+                detail_success, _, detail = await self._fetch_stock_entry_detail(
+                    api_key,
+                    api_secret,
+                    docname,
+                )
+            if detail_success:
+                summary = detail.copy()
+                text_message = self._format_stock_entry_message(summary, detail)
+                markup = self._entry_action_buttons(detail)
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=text_message,
+                    reply_markup=markup,
+                )
+            else:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        "✅ Stock Entry yaratildi.\n"
+                        f"Nom: {docname or 'ERPNext'}\n"
+                        f"Tur: {draft.get('entry_type_label')}\n"
+                        f"Buyum: {item.get('name')} ({item.get('code')})\n"
+                        f"Ombor: {warehouse}\n"
+                        f"Miqdor: {qty}"
+                    ),
+                )
         else:
             draft["stage"] = "await_qty"
             self.storage.save_entry_draft(user_id, draft)
@@ -692,17 +841,17 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
         self._log_event(user_id, "cancel_draft", kind=draft_kind, stage=stage)
         if draft_kind == "purchase_confirm":
             self.storage.delete_entry_draft(user_id)
-            await message.reply_text("Purchase Receipt tasdiqlash jarayoni bekor qilindi.")
+            await message.reply_text("Kirim hujjati tasdiqlash jarayoni bekor qilindi.")
             return True
         if draft_kind == "delivery_confirm":
             self.storage.delete_entry_draft(user_id)
-            await message.reply_text("Delivery Note tasdiqlash jarayoni bekor qilindi.")
+            await message.reply_text("Chiqqan mahsulot hujjati tasdiqlash jarayoni bekor qilindi.")
             return True
         notice = None
         if draft_kind == "purchase_receipt":
-            notice = "Purchase Receipt jarayoni bekor qilindi."
+            notice = "Kirim hujjati jarayoni bekor qilindi."
         elif draft_kind == "delivery_note":
-            notice = "Delivery Note jarayoni bekor qilindi."
+            notice = "Chiqqan mahsulot hujjati jarayoni bekor qilindi."
         await self._cancel_entry_creation(
             user_id=user_id,
             chat_id=chat_id,
@@ -744,7 +893,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
         else:
             text = (
                 "✅ API kalit va secret tasdiqlandi.\n"
-                "Quyidagi menyudan foydalanib ERPNext dagi Itemlarni ko'ring yoki tayyorlab qo'ying."
+                "Quyidagi menyudan foydalanib ERPNext dagi buyumlarni ko'ring yoki tayyorlab qo'ying."
             )
             reply_markup = self._main_menu_markup()
 
@@ -752,7 +901,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
         if status == "active":
             await context.bot.send_message(
                 chat_id=chat.id,
-                text="📦 Itemlar bo'limini ochish uchun tugmani bosing.",
+                text="📦 Buyumlar bo'limini ochish uchun tugmani bosing.",
                 reply_markup=self._items_markup(),
             )
 
@@ -764,9 +913,10 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
             "Jarayon:\n"
             "1. /start ni shaxsiy chatda yuboring.\n"
             "2. 14-18 belgidan iborat API kalitni, keyin secretni kiriting.\n"
-            "3. Tasdiqdan so'ng bot \"📦 Itemlarni ko'rish\" tugmasini yuboradi. "
-            "Tugma inline qidiruv oynasini ochadi va ERPNext Item ro'yxatini ko'rsatadi.\n\n"
-            "Har doim yangi kalit kiritish uchun shunchaki yangi qiymatni yuboring."
+            "3. Tasdiqdan so'ng bot \"📦 Buyumlarni ko'rish\" tugmasini yuboradi. "
+            "Tugma inline qidiruv oynasini ochadi va ERPNext buyumlar ro'yxatini ko'rsatadi.\n\n"
+            "Har doim yangi kalit kiritish uchun shunchaki yangi qiymatni yuboring.\n"
+            "Saqlangan API kalitlarini tozalash uchun /apic deb yozing."
         )
         if chat.type == ChatType.PRIVATE:
             await context.bot.send_message(chat_id=chat.id, text=text)
@@ -785,7 +935,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
         api_key = creds.get("api_key") or ""
         api_secret = creds.get("api_secret") or ""
         await update.message.reply_text(
-            "Inline tugmani bosing va itemlarni ko'ring.",
+            "Inline tugmani bosing va buyumlarni ko'ring.",
             reply_markup=self._items_markup(),
         )
         await self._send_item_preview(
@@ -821,8 +971,58 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
             show_message=False,
         )
         await message.reply_text(
-            "Stock Entry menyusi:\nHarakatlarni ko'rish yoki yangi harakat yaratish uchun variantni tanlang.",
+            "Stock Entry menyusi:\nYangi harakat yaratish yoki tasdiqlash uchun variantni tanlang.",
             reply_markup=self._entry_markup(),
+        )
+
+    async def handle_formalize_callback(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        query = update.callback_query
+        if not query:
+            return
+        data = (query.data or "").strip()
+        await query.answer()
+        if data not in {FORMALIZE_INCOMING_CALLBACK, FORMALIZE_OUTGOING_CALLBACK}:
+            return
+        message = query.message
+        user = query.from_user
+        chat = message.chat if message else None
+        if not chat or not user or chat.type != ChatType.PRIVATE:
+            return
+        creds = self.storage.get_credentials(user.id)
+        if not creds or creds.get("status") != "active":
+            await context.bot.send_message(
+                chat_id=chat.id, text="Avval /start orqali API kalit va secret ni tasdiqlang."
+            )
+            return
+        api_key = creds.get("api_key") or ""
+        api_secret = creds.get("api_secret") or ""
+        if data == FORMALIZE_INCOMING_CALLBACK:
+            await self._send_purchase_preview(
+                chat_id=chat.id,
+                api_key=api_key,
+                api_secret=api_secret,
+                context=context,
+                show_preview=False,
+            )
+            await context.bot.send_message(
+                chat_id=chat.id,
+                text="Kirgan mahsulotlarni rasmiylashtirish menyusi:",
+                reply_markup=self._purchase_markup(),
+            )
+            return
+        await self._send_delivery_preview(
+            chat_id=chat.id,
+            api_key=api_key,
+            api_secret=api_secret,
+            context=context,
+            show_message=False,
+        )
+        await context.bot.send_message(
+            chat_id=chat.id,
+            text="Chiqqan mahsulotlarni rasmiylashtirish menyusi:",
+            reply_markup=self._delivery_markup(),
         )
 
     async def _handle_clear_request(
@@ -889,7 +1089,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
             return
         success, error, detail = await self._fetch_item_detail(api_key, api_secret, action)
         if not success:
-            await query.answer(error or "Item ma'lumotini olishda xatolik.", show_alert=True)
+            await query.answer(error or "Buyum ma'lumotini olishda xatolik.", show_alert=True)
             return
         text = self._format_item_message(detail)
         await query.answer()
@@ -961,7 +1161,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
         chat_id = query.message.chat_id if query.message else user.id
         self.storage.delete_entry_draft(user.id)
         await query.answer()
-        await context.bot.send_message(chat_id=chat_id, text="Yangi Stock Entry yaratishni boshlaymiz.")
+        await context.bot.send_message(chat_id=chat_id, text="Yangi harakat yaratishni boshlaymiz.")
         await self._start_entry_creation(user_id=user.id, chat_id=chat_id, context=context)
 
     async def handle_entry_creation_callback(
@@ -1179,6 +1379,27 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                 text=fallback,
             )
 
+    async def handle_entry_dismiss_callback(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        query = update.callback_query
+        if not query:
+            return
+        user = query.from_user
+        if not user:
+            await query.answer("Foydalanuvchi aniqlanmadi.", show_alert=True)
+            return
+        parts = (query.data or "").split(":", 1)
+        docname = parts[1] if len(parts) == 2 else ""
+        await query.answer("Saqlab qo'yildi.", show_alert=False)
+        if query.message:
+            await query.edit_message_reply_markup(reply_markup=None)
+        await context.bot.send_message(
+            chat_id=query.message.chat_id if query.message else user.id,
+            text=f"📁 {docname or 'Harakat'} draft holatida saqlanib turibdi.",
+        )
+        self._log_event(user.id, "entry_draft_exit", doc=docname)
+
     async def handle_private_message(
         self,
         update: Update,
@@ -1246,8 +1467,8 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                     return
                 await message.reply_text(
                     (
-                        "Purchase Receipt tasdiqlash jarayoni davom etmoqda.\n"
-                        "Inline menyudan #purchaseapprove rezultati yuboring yoki /cancel deb yozib bekor qiling."
+                        "Kirim hujjatini tasdiqlash jarayoni davom etmoqda.\n"
+                        "Inline menyudan #purchaseapprove natijasini yuboring yoki /cancel deb yozib bekor qiling."
                     )
                 )
                 return
@@ -1267,8 +1488,8 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                     return
                 await message.reply_text(
                     (
-                        "Delivery Note tasdiqlash jarayoni davom etmoqda.\n"
-                        "Inline menyundan #deliveryapprove rezultati yuboring yoki /cancel deb yozib bekor qiling."
+                        "Chiqqan mahsulot hujjatini tasdiqlash jarayoni davom etmoqda.\n"
+                        "Inline menyundan #deliveryapprove natijasini yuboring yoki /cancel deb yozib bekor qiling."
                     )
                 )
                 return
@@ -1357,7 +1578,8 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                 return
 
         normalized = text.lower()
-        if text in {"📦 Itemlar", "📦 Itemlarni ko'rish"}:
+        item_texts = {"📦 Buyumlar", "📦 Buyumlarni ko'rish", "📦 Itemlar", "📦 Itemlarni ko'rish"}
+        if text in item_texts:
             if status != "active":
                 await message.reply_text("Avval API kalit va secretni kiriting.")
                 return
@@ -1388,7 +1610,18 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                 show_message=False,
             )
             return
-        if text in {"🧾 Purchase Receipt"} or normalized in {"purchase receipt", "purchase"}:
+        if text in {"📝 Rasmiylashtirish"} or normalized in {"rasmiylashtirish"}:
+            if status != "active":
+                await message.reply_text("Avval API kalit va secretni kiriting.")
+                return
+            await message.reply_text(
+                "Mahsulotni rasmiylashtirish turini tanlang:",
+                reply_markup=self._formalization_options_markup(),
+            )
+            return
+        purchase_texts = {"🧾 Kirim hujjati", "📥 Kirgan mahsulotni rasmiylashtirish"}
+        purchase_normalized = {"kirim hujjati", "kirim", "kirgan mahsulotni rasmiylashtirish"}
+        if text in purchase_texts or normalized in purchase_normalized:
             if status != "active":
                 await message.reply_text("Avval API kalit va secretni kiriting.")
                 return
@@ -1399,13 +1632,16 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                 api_key=api_key,
                 api_secret=api_secret,
                 context=context,
+                show_preview=False,
             )
             await message.reply_text(
-                "Purchase Receipt menyusi:",
+                "Kirgan mahsulotlarni rasmiylashtirish menyusi:",
                 reply_markup=self._purchase_markup(),
             )
             return
-        if text in {"🚚 Delivery Note"} or normalized in {"delivery note", "delivery"}:
+        delivery_texts = {"🚚 Chiqqan mahsulot hujjati", "📤 Chiqqan mahsulotni rasmiylashtirish"}
+        delivery_normalized = {"chiqqan mahsulot hujjati", "chiqim", "chiqqan mahsulotni rasmiylashtirish"}
+        if text in delivery_texts or normalized in delivery_normalized:
             if status != "active":
                 await message.reply_text("Avval API kalit va secretni kiriting.")
                 return
@@ -1416,16 +1652,13 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                 api_key=api_key,
                 api_secret=api_secret,
                 context=context,
+                show_message=False,
             )
             await message.reply_text(
-                "Delivery Note menyusi:",
+                "Chiqqan mahsulotlarni rasmiylashtirish menyusi:",
                 reply_markup=self._delivery_markup(),
             )
             return
-        if text in {"♻️ API ni tozalash"}:
-            await self._handle_clear_request(user_id=user.id, message=message, context=context)
-            return
-
         if status == "pending_key" or not (creds and creds.get("api_key")):
             if not self._validate_token(text):
                 await message.reply_text(
@@ -1447,11 +1680,11 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
             self.storage.store_api_secret(user.id, text, verified=verified)
             if verified:
                 await message.reply_text(
-                    "✅ API secret tasdiqlandi. Endi itemlarni ko'rishingiz mumkin.",
+                    "✅ API secret tasdiqlandi. Endi buyumlarni ko'rishingiz mumkin.",
                     reply_markup=self._main_menu_markup(),
                 )
                 await message.reply_text(
-                    "📦 Itemlar menyusi:",
+                    "📦 Buyumlar menyusi:",
                     reply_markup=self._items_markup(),
                 )
             else:
@@ -1460,11 +1693,11 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
             return
 
         await message.reply_text(
-            "API kalitlari allaqachon saqlangan. Item ro'yxati uchun /items yozing yoki pastdagi menyudan foydalaning.",
+            "API kalitlari allaqachon saqlangan. Buyum ro'yxati uchun /items yozing yoki pastdagi menyudan foydalaning.",
             reply_markup=self._main_menu_markup(),
         )
         await message.reply_text(
-            "📦 Itemlar menyusi:",
+            "📦 Buyumlar menyusi:",
             reply_markup=self._items_markup(),
         )
 
@@ -1539,7 +1772,8 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                     api_key, api_secret, docname
                 )
                 message_text = self._format_stock_entry_message(row, detail if detail_success else None)
-                title = f"{docname} ({row.get('purpose') or '-'})"
+                entry_label = self._entry_type_display(row.get("purpose") or row.get("stock_entry_type"))
+                title = f"{docname} ({entry_label})"
                 warehouses = f"{row.get('from_warehouse') or '-'} → {row.get('to_warehouse') or '-'}"
                 posting = row.get("posting_date") or "-"
                 description = f"{posting} • {warehouses}"
@@ -1565,7 +1799,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                 query=search_term,
             )
             if not success:
-                hint = error_detail or "Item ro'yxatini olishda xatolik"
+                hint = error_detail or "Buyumlar ro'yxatini olishda xatolik"
                 await inline_query.answer(
                     [],
                     is_personal=True,
@@ -1575,14 +1809,14 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                 return
             results = []
             for idx, row in enumerate(rows):
-                item_name = row.get("item_name") or row.get("name") or row.get("item_code") or "Item"
+                item_name = row.get("item_name") or row.get("name") or row.get("item_code") or "Buyum"
                 item_code = row.get("item_code") or row.get("name") or "-"
                 uom = row.get("stock_uom") or "-"
                 text = "\n".join(
                     [
                         "#entryitem",
                         f"📦 {item_name}",
-                        f"Item Code: {item_code}",
+                        f"Buyum kodi: {item_code}",
                         f"UOM: {uom}",
                     ]
                 )
@@ -1667,13 +1901,16 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                 if not docname:
                     continue
                 status = self._docstatus_label(row.get("docstatus"))
-                title = f"{docname} ({status})"
-                description = row.get("posting_date") or "-"
+                entry_type = self._entry_type_display(row.get("purpose") or row.get("stock_entry_type"))
+                short_name = docname[-5:] if len(docname) > 5 else docname
+                title = f"{short_name} ({entry_type})"
+                description = f"{row.get('posting_date') or '-'} • {status}"
                 track_token = f"{ENTRY_APPROVE_PREFIX}:{docname}"
                 text = "\n".join(
                     [
                         "#entryapprove",
                         f"Stock Entry: {docname}",
+                        f"Harakat turi: {entry_type}",
                         f"Status: {status}",
                         track_token,
                     ]
@@ -1699,7 +1936,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                 query=search_term,
             )
             if not success:
-                hint = error_detail or "Purchase Receipt ro'yxatini olishda xatolik"
+                hint = error_detail or "Kirim hujjatlari ro'yxatini olishda xatolik"
                 await inline_query.answer(
                     [],
                     is_personal=True,
@@ -1746,7 +1983,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                 query=search_term,
             )
             if not success:
-                hint = error_detail or "Purchase Receipt ro'yxatini olishda xatolik"
+                hint = error_detail or "Kirim hujjatlari ro'yxatini olishda xatolik"
                 await inline_query.answer(
                     [],
                     is_personal=True,
@@ -1766,8 +2003,8 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                 text = "\n".join(
                     [
                         "#purchaseapprove",
-                        f"Purchase Receipt: {docname}",
-                        f"Supplier: {supplier}",
+                        f"Kirim hujjati: {docname}",
+                        f"Yetkazib beruvchi: {supplier}",
                         f"Status: {status}",
                         track_token,
                     ]
@@ -1793,7 +2030,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                 query=search_term,
             )
             if not success:
-                hint = error_detail or "Item ro'yxatini olishda xatolik"
+                hint = error_detail or "Buyumlar ro'yxatini olishda xatolik"
                 await inline_query.answer(
                     [],
                     is_personal=True,
@@ -1803,14 +2040,14 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                 return
             results = []
             for idx, row in enumerate(rows):
-                item_name = row.get("item_name") or row.get("name") or row.get("item_code") or "Item"
+                item_name = row.get("item_name") or row.get("name") or row.get("item_code") or "Buyum"
                 item_code = row.get("item_code") or row.get("name") or "-"
                 uom = row.get("stock_uom") or "-"
                 text = "\n".join(
                     [
                         "#pritem",
                         f"📦 {item_name}",
-                        f"Item Code: {item_code}",
+                        f"Buyum kodi: {item_code}",
                         f"UOM: {uom}",
                     ]
                 )
@@ -1836,7 +2073,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                 query=search_term,
             )
             if not success:
-                hint = error_detail or "Supplier ro'yxatini olishda xatolik"
+                hint = error_detail or "Yetkazib beruvchilar ro'yxatini olishda xatolik"
                 await inline_query.answer(
                     [],
                     is_personal=True,
@@ -1854,8 +2091,8 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                 text = "\n".join(
                     [
                         "#supplier",
-                        f"Supplier: {label}",
-                        f"Code: {name}",
+                        f"Yetkazib beruvchi: {label}",
+                        f"Kod: {name}",
                     ]
                 )
                 results.append(
@@ -1879,7 +2116,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                 query=search_term,
             )
             if not success:
-                hint = error_detail or "Delivery Note ro'yxatini olishda xatolik"
+                hint = error_detail or "Chiqqan mahsulot hujjatlari ro'yxatini olishda xatolik"
                 await inline_query.answer(
                     [],
                     is_personal=True,
@@ -1925,7 +2162,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                 query=search_term,
             )
             if not success:
-                hint = error_detail or "Delivery Note ro'yxatini olishda xatolik"
+                hint = error_detail or "Chiqqan mahsulot hujjatlari ro'yxatini olishda xatolik"
                 await inline_query.answer(
                     [],
                     is_personal=True,
@@ -1945,7 +2182,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                 text = "\n".join(
                     [
                         "#deliveryapprove",
-                        f"Delivery Note: {docname}",
+                        f"Chiqqan mahsulot hujjati: {docname}",
                         f"Customer: {customer}",
                         f"Status: {status}",
                         track_token,
@@ -1972,7 +2209,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                 query=search_term,
             )
             if not success:
-                hint = error_detail or "Item ro'yxatini olishda xatolik"
+                hint = error_detail or "Buyumlar ro'yxatini olishda xatolik"
                 await inline_query.answer(
                     [],
                     is_personal=True,
@@ -1982,14 +2219,14 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                 return
             results = []
             for idx, row in enumerate(rows):
-                item_name = row.get("item_name") or row.get("name") or row.get("item_code") or "Item"
+                item_name = row.get("item_name") or row.get("name") or row.get("item_code") or "Buyum"
                 item_code = row.get("item_code") or row.get("name") or "-"
                 uom = row.get("stock_uom") or "-"
                 text = "\n".join(
                     [
                         "#dnitem",
                         f"📦 {item_name}",
-                        f"Item Code: {item_code}",
+                        f"Buyum kodi: {item_code}",
                         f"UOM: {uom}",
                     ]
                 )
@@ -2070,20 +2307,20 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
 
         results = []
         for idx, row in enumerate(rows):
-            item_name = row.get("item_name") or row.get("name") or row.get("item_code") or "Item"
+            item_name = row.get("item_name") or row.get("name") or row.get("item_code") or "Buyum"
             item_code = row.get("item_code") or row.get("name") or ""
             uom = row.get("stock_uom") or "-"
             item_group = row.get("item_group") or "-"
             rate = row.get("standard_rate")
             description_raw = self._clean_text(row.get("description"))
             title = f"{item_name} ({item_code})" if item_code and item_code != item_name else item_name
-            summary_parts = [f"Kod: {item_code or '-'}", f"UOM: {uom}", f"Group: {item_group}"]
+            summary_parts = [f"Kod: {item_code or '-'}", f"O'lchov: {uom}", f"Guruhi: {item_group}"]
             description = " | ".join(summary_parts)
             detail_lines = [
                 f"📦 {title}",
-                f"Item Code: {item_code or '-'}",
-                f"Item Group: {item_group}",
-                f"UOM: {uom}",
+                f"Buyum kodi: {item_code or '-'}",
+                f"Buyum guruhi: {item_group}",
+                f"O'lchov birligi: {uom}",
             ]
             if rate not in (None, ""):
                 detail_lines.append(f"Narx: {rate}")
@@ -2147,9 +2384,20 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
             "order_by": "item_name asc",
         }
         query = query.strip()
+        transliterated = self._transliterate_cyrillic(query) if query else ""
         if query:
-            filters = [["Item", "item_name", "like", f"%{query}%"]]
-            params["filters"] = json.dumps(filters)
+            or_filters = [
+                ["Item", "item_name", "like", f"%{query}%"],
+                ["Item", "item_code", "like", f"%{query}%"],
+            ]
+            if transliterated and transliterated != query:
+                or_filters.extend(
+                    [
+                        ["Item", "item_name", "like", f"%{transliterated}%"],
+                        ["Item", "item_code", "like", f"%{transliterated}%"],
+                    ]
+                )
+            params["or_filters"] = json.dumps(or_filters)
 
         def _request() -> Tuple[bool, Optional[str], list[Dict[str, Any]]]:
             headers = {
@@ -2260,7 +2508,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
             try:
                 payload = response.json()
             except ValueError:
-                return False, "Supplier javobini JSON tarzida o'qib bo'lmadi.", []
+                return False, "Yetkazib beruvchilar javobini JSON tarzida o'qib bo'lmadi.", []
             data = payload.get("data") if isinstance(payload, dict) else payload
             if not isinstance(data, list):
                 data = []
@@ -2269,7 +2517,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
         try:
             return await asyncio.to_thread(_request)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Supplier ro'yxatini olishda xatolik: %s", exc)
+            logger.warning("Yetkazib beruvchilar ro'yxatini olishda xatolik: %s", exc)
             return False, str(exc), []
 
     async def _fetch_stock_entries(
@@ -2391,16 +2639,16 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
             try:
                 payload = response.json()
             except ValueError:
-                return False, "Item tafsilotini JSON tarzida o'qib bo'lmadi.", {}
+                return False, "Buyum tafsilotini JSON tarzida o'qib bo'lmadi.", {}
             data = payload.get("data") if isinstance(payload, dict) else payload
             if not isinstance(data, dict):
-                return False, "Item ma'lumoti topilmadi.", {}
+                return False, "Buyum ma'lumoti topilmadi.", {}
             return True, None, data
 
         try:
             return await asyncio.to_thread(_request)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Item tafsilotlarini olishda xatolik: %s", exc)
+            logger.warning("Buyum tafsilotlarini olishda xatolik: %s", exc)
             return False, str(exc), {}
 
     async def _create_stock_entry(
@@ -2561,13 +2809,13 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
     def _format_entry_error(self, error_detail: Optional[str]) -> str:
         if not error_detail:
             return (
-                "Stock Entry yaratishda xatolik yuz berdi. ERPNext talablarini tekshirib, item ma'lumotlarini yangilang."
+                "Stock Entry yaratishda xatolik yuz berdi. ERPNext talablarini tekshirib, buyum ma'lumotlarini yangilang."
             )
         cleaned = self._clean_text(error_detail).replace("\n", " ").strip()
         if "Allow Zero Valuation Rate" in cleaned or "Valuation Rate" in cleaned:
             return (
-                "Stock Entry yaratilmadi: ERPNext item uchun baholash (valuation) qiymatini talab qildi.\n"
-                "• Item kartasida `Standard Rate` qo'shing yoki\n"
+                "Stock Entry yaratilmadi: ERPNext buyum uchun baholash (valuation) qiymatini talab qildi.\n"
+                "• Buyum kartasida `Standard Rate` qo'shing yoki\n"
                 "• Stock Entry formasi ichida “Allow Zero Valuation Rate” opsiyasini yoqing.\n"
                 "Shundan so'ng bot orqali jarayonni qayta boshlang.\n"
                 f"ERP xabari: {cleaned}"
@@ -2598,7 +2846,8 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
         detail = detail or {}
         name = summary.get("name") or detail.get("name") or "-"
         purpose = summary.get("purpose") or detail.get("purpose") or "-"
-        entry_type = summary.get("stock_entry_type") or detail.get("stock_entry_type") or "-"
+        entry_type_raw = summary.get("stock_entry_type") or detail.get("stock_entry_type")
+        entry_type = self._entry_type_display(entry_type_raw)
         posting_date = summary.get("posting_date") or detail.get("posting_date") or "-"
         posting_time = summary.get("posting_time") or detail.get("posting_time") or "-"
         from_wh = summary.get("from_warehouse") or detail.get("from_warehouse")
@@ -2620,8 +2869,9 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                         break
         from_wh = from_wh or "-"
         to_wh = to_wh or "-"
+        short_name = name[-5:] if len(name) > 5 else name
         lines = [
-            f"🚚 Stock Entry: {name}",
+            f"🚚 Stock Entry: {short_name}",
             f"Maqsad: {purpose}",
             f"Tur: {entry_type}",
             f"Sana: {posting_date} {posting_time}",
@@ -2666,8 +2916,8 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
         warehouse = warehouse or "-"
         total = detail.get("grand_total") or summary.get("grand_total") or "-"
         lines = [
-            f"🧾 Purchase Receipt: {name}",
-            f"Supplier: {supplier}",
+            f"🧾 Kirim hujjati: {name}",
+            f"Yetkazib beruvchi: {supplier}",
             f"Sana: {posting_date} {posting_time}",
             f"Ombor: {warehouse}",
             f"Jami: {total}",
@@ -2687,7 +2937,7 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                     f"• {item_code} {label} — Qabul: {accepted}, Reject: {rejected}, Rate: {rate}"
                 )
             if len(items) > max_items:
-                lines.append(f"... va yana {len(items) - max_items} ta item")
+                lines.append(f"... va yana {len(items) - max_items} ta buyum")
         return "\n".join(lines)
 
     async def _handle_entry_approve_message(
@@ -2735,6 +2985,13 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
                     InlineKeyboardButton("🗑️ O'chirish", callback_data=f"{ENTRY_DELETE_PREFIX}:{docname}"),
                 ]
             )
+            buttons.append(
+                [
+                    InlineKeyboardButton(
+                        "📁 Saqlab chiqish", callback_data=f"{ENTRY_DISMISS_PREFIX}:{docname}"
+                    )
+                ]
+            )
         elif docstatus == 1:
             buttons.append(
                 [
@@ -2759,10 +3016,10 @@ class StockManagerBot(DeliveryFlowMixin, PurchaseFlowMixin):
         standard_rate = detail.get("standard_rate")
         disabled = detail.get("disabled")
         lines = [
-            f"📦 Item: {name}",
-            f"Code: {code}",
-            f"Group: {group}",
-            f"UOM: {uom}",
+            f"📦 Buyum: {name}",
+            f"Kod: {code}",
+            f"Guruhi: {group}",
+            f"O'lchov birligi: {uom}",
         ]
         if standard_rate not in (None, ""):
             lines.append(f"Narx: {standard_rate}")

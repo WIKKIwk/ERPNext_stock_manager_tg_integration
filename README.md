@@ -5,10 +5,10 @@ Mustaqil Telegram bot bo'lib, omborchi (stock manager) ERPNext bilan integratsiy
 ## Asosiy imkoniyatlar
 
 - `/start` buyrug'i bilan 14–18 belgilik API key/secret juftligini tasdiqlash va menyuni ochish.
-- “📦 Itemlarni ko'rish” tugmasi inline qidiruvni ishga tushirib, `Item` ro'yxatini filtr bilan ko'rsatadi.
+- “📦 Buyumlarni ko'rish” tugmasi inline qidiruvni ishga tushirib, `Item` ro'yxatini filtr bilan ko'rsatadi.
 - `/entry` menyusi orqali mavjud Stock Entry larni ko'rish yoki “Material kiridi/chiqdi” oqimi orqali yangisini yaratish.
 - Purchase Receipt va Delivery Note larni ko'rish, tasdiqlash, bekor qilish hamda bot ichida yaratish.
-- `/clear` va `/cancel` buyruqlari bilan mavjud API kalitlarini yoki davom etayotgan jarayonlarni tozalash.
+- `/apic` buyrug'i bilan mavjud API kalitlarini, `/cancel` bilan esa davom etayotgan jarayonlarni tozalash.
 
 ## Talablar
 

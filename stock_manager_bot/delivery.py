@@ -30,6 +30,7 @@ DELIVERY_CANCEL_PREFIX = "delivery-cancel"
 DELIVERY_DELETE_PREFIX = "delivery-delete"
 DELIVERY_CONFIRM_CALLBACK = "delivery:confirm"
 DELIVERY_APPROVE_QUERY_PREFIXES = ("deliveryapprove", "dnapprove")
+DELIVERY_DISMISS_PREFIX = "delivery-dismiss"
 
 
 class DeliveryFlowMixin:
@@ -38,14 +39,14 @@ class DeliveryFlowMixin:
     # ---------------------------------------------------------------- menus
     def _delivery_markup(self) -> InlineKeyboardMarkup:
         view_button = InlineKeyboardButton(
-            "🚚 Delivery Note'larni ko'rish",
+            "Ko'rish",
             switch_inline_query_current_chat=DELIVERY_TRIGGER,
         )
         create_button = InlineKeyboardButton(
-            "➕ Yangi Delivery Note", callback_data=DELIVERY_CALLBACK_CREATE
+            "➕ Yangi rasmiylashtirish", callback_data=DELIVERY_CALLBACK_CREATE
         )
         confirm_button = InlineKeyboardButton(
-            "✔️ Delivery Note'ni tasdiqlash", callback_data=DELIVERY_CONFIRM_CALLBACK
+            "✔️ Tasdiqlash", callback_data=DELIVERY_CONFIRM_CALLBACK
         )
         return InlineKeyboardMarkup([[view_button], [create_button], [confirm_button]])
 
@@ -58,7 +59,7 @@ class DeliveryFlowMixin:
         return InlineKeyboardMarkup([[self._delivery_cancel_button()]])
 
     def _delivery_skip_button(self) -> InlineKeyboardButton:
-        return InlineKeyboardButton("⏭ Skip", callback_data=f"{DELIVERY_CREATE_PREFIX}:skip")
+        return InlineKeyboardButton("⏭ O'tkazib yuborish", callback_data=f"{DELIVERY_CREATE_PREFIX}:skip")
 
     def _delivery_skip_markup(self) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup([[self._delivery_skip_button()], [self._delivery_cancel_button()]])
@@ -97,7 +98,7 @@ class DeliveryFlowMixin:
         await context.bot.send_message(
             chat_id=chat_id,
             text=(
-                f"🚚 Yangi Delivery Note seriyasi: {draft['series']}\n"
+                f"🚚 Yangi chiqim hujjati (Delivery Note) seriyasi: {draft['series']}\n"
                 f"Sana: {draft['posting_date']} {draft['posting_time']}\n"
                 "Avval mijozni tanlang."
             ),
@@ -135,7 +136,7 @@ class DeliveryFlowMixin:
             chat_id=chat_id,
             text=(
                 f"Posting sanasi hozir {current_date}.\n"
-                "O'zgartirmoqchi bo'lsangiz YYYY-MM-DD formatida yuboring yoki 'Skip'ni bosing."
+                "O'zgartirmoqchi bo'lsangiz YYYY-MM-DD formatida yuboring yoki \"O'tkazib yuborish\"ni bosing."
             ),
             reply_markup=self._delivery_skip_markup(),
         )
@@ -151,7 +152,7 @@ class DeliveryFlowMixin:
             chat_id=chat_id,
             text=(
                 f"Posting vaqti hozir {current_time}.\n"
-                "HH:MM formatida yuboring yoki 'Skip'ni bosing."
+                "HH:MM formatida yuboring yoki \"O'tkazib yuborish\"ni bosing."
             ),
             reply_markup=self._delivery_skip_markup(),
         )
@@ -161,7 +162,7 @@ class DeliveryFlowMixin:
     ) -> None:
         await context.bot.send_message(
             chat_id=chat_id,
-            text="Bu qaytariluvchi (Is Return) Delivery Note'mi?",
+            text="Bu qaytariluvchi chiqim hujjatimi?",
             reply_markup=self._delivery_yes_no_markup(),
         )
 
@@ -190,11 +191,15 @@ class DeliveryFlowMixin:
             [
                 [
                     InlineKeyboardButton(
-                        "📦 Item qidirish",
+                        "📦 Buyum qidirish",
                         switch_inline_query_current_chat=f"{DELIVERY_ITEM_QUERY_PREFIX} ",
                     )
                 ],
-                [InlineKeyboardButton("✅ Delivery Note yaratish", callback_data=f"{DELIVERY_CREATE_PREFIX}:finish")],
+                [
+                    InlineKeyboardButton(
+                        "✅ Rasmiylashtirishni yakunlash", callback_data=f"{DELIVERY_CREATE_PREFIX}:finish"
+                    )
+                ],
                 [self._delivery_cancel_button()],
             ]
         )
@@ -254,7 +259,7 @@ class DeliveryFlowMixin:
             if line.startswith("📦"):
                 name = line.lstrip("📦").strip()
             lowered = line.lower()
-            if lowered.startswith("item code:"):
+            if lowered.startswith("item code:") or lowered.startswith("buyum kodi:"):
                 code = line.split(":", 1)[1].strip()
             if lowered.startswith("uom:"):
                 uom = line.split(":", 1)[1].strip()
@@ -289,7 +294,16 @@ class DeliveryFlowMixin:
         stage = draft.get("stage")
         chat_id = draft.get("chat_id", message.chat_id)
         normalized = text.strip().lower()
-        skip_values = {"skip", "-", "yo'q", "yoq", "otkaz", "o'tkaz"}
+        skip_values = {
+            "skip",
+            "-",
+            "yo'q",
+            "yoq",
+            "otkaz",
+            "o'tkaz",
+            "otkazib yuborish",
+            "o'tkazib yuborish",
+        }
 
         if stage == "dn_customer":
             data = self._parse_delivery_customer(text)
@@ -362,7 +376,7 @@ class DeliveryFlowMixin:
             data = self._parse_delivery_item(text)
             if not data:
                 if not from_inline_result:
-                    await message.reply_text("Item tanlash uchun inline tugmasidan foydalaning.")
+                    await message.reply_text("Buyum tanlash uchun inline tugmasidan foydalaning.")
                 return True
             draft["current_item"] = data
             draft["stage"] = "dn_item_qty"
@@ -450,7 +464,7 @@ class DeliveryFlowMixin:
         if not customer or not source_warehouse or not items:
             await context.bot.send_message(
                 chat_id=chat_id,
-                text="Ma'lumotlar yetarli emas. Mijoz, ombor va kamida bitta item tanlang.",
+                text="Ma'lumotlar yetarli emas. Mijoz, ombor va kamida bitta buyumni tanlang.",
                 reply_markup=self._delivery_cancel_markup(),
             )
             draft["stage"] = "dn_items_menu"
@@ -486,20 +500,38 @@ class DeliveryFlowMixin:
         )
         if success:
             self.storage.delete_entry_draft(user_id)
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=(
-                    "✅ Delivery Note yaratildi.\n"
-                    f"Nom: {docname or 'ERPNext'}\n"
-                    f"Mijoz: {customer.get('label')}\n"
-                    f"Ombor: {source_warehouse}\n"
-                    f"Itemlar soni: {len(items)}"
-                ),
-            )
+            detail_success = False
+            detail: Dict[str, Any] = {}
+            if docname:
+                detail_success, _, detail = await self._fetch_delivery_note_detail(
+                    api_key,
+                    api_secret,
+                    docname,
+                )
+            if detail_success:
+                summary = detail.copy()
+                text_message = self._format_delivery_note_message(summary, detail)
+                markup = self._delivery_action_buttons(detail)
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=text_message,
+                    reply_markup=markup,
+                )
+            else:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        "✅ Chiqqan mahsulotni rasmiylashtirish yakunlandi.\n"
+                        f"Nom: {docname or 'ERPNext'}\n"
+                        f"Mijoz: {customer.get('label')}\n"
+                        f"Ombor: {source_warehouse}\n"
+                        f"Buyumlar soni: {len(items)}"
+                    ),
+                )
         else:
             draft["stage"] = "dn_items_menu"
             self.storage.save_entry_draft(user_id, draft)
-            message = error_detail or "Delivery Note yaratishda xatolik yuz berdi."
+            message = error_detail or "Chiqqan mahsulot hujjatini yaratishda xatolik yuz berdi."
             await context.bot.send_message(
                 chat_id=chat_id,
                 text=message + "\nJarayonni davom ettirish yoki bekor qilish mumkin.",
@@ -558,7 +590,7 @@ class DeliveryFlowMixin:
             context=context,
         )
         await message.reply_text(
-            "Delivery Note menyusi:",
+            "Chiqqan mahsulotlarni rasmiylashtirish menyusi:",
             reply_markup=self._delivery_markup(),
         )
 
@@ -584,7 +616,7 @@ class DeliveryFlowMixin:
         chat_id = query.message.chat_id if query.message else user.id
         self.storage.delete_entry_draft(user.id)
         await query.answer()
-        await context.bot.send_message(chat_id=chat_id, text="Yangi Delivery Note yaratishni boshlaymiz.")
+        await context.bot.send_message(chat_id=chat_id, text="Yangi chiqim hujjatini yaratishni boshlaymiz.")
         await self._start_delivery_note_creation(user_id=user.id, chat_id=chat_id, context=context)
 
     async def handle_delivery_creation_callback(
@@ -602,7 +634,7 @@ class DeliveryFlowMixin:
         value = parts[2] if len(parts) > 2 else ""
         draft = self.storage.get_entry_draft(user.id)
         if not draft or draft.get("kind") != "delivery_note":
-            await query.answer("Delivery Note jarayoni topilmadi.", show_alert=True)
+            await query.answer("Chiqqan mahsulot hujjati jarayoni topilmadi.", show_alert=True)
             return
         chat_id = draft.get("chat_id") or (query.message.chat_id if query.message else user.id)
         creds = self.storage.get_credentials(user.id)
@@ -620,12 +652,12 @@ class DeliveryFlowMixin:
                 await query.answer("Avval omborni tanlang.", show_alert=True)
                 return
             if not draft.get("items"):
-                await query.answer("Hech bo'lmaganda bitta item qo'shing.", show_alert=True)
+                await query.answer("Hech bo'lmaganda bitta buyum qo'shing.", show_alert=True)
                 return
             draft["stage"] = "dn_submitting"
             self.storage.save_entry_draft(user.id, draft)
             await query.answer("Yaratilmoqda…", show_alert=False)
-            await context.bot.send_message(chat_id=chat_id, text="⏳ Delivery Note yaratilmoqda...")
+            await context.bot.send_message(chat_id=chat_id, text="⏳ Chiqqan mahsulot hujjati yaratilmoqda...")
             await self._finalise_delivery_note_creation(
                 user_id=user.id,
                 draft=draft,
@@ -641,7 +673,7 @@ class DeliveryFlowMixin:
                 user_id=user.id,
                 chat_id=chat_id,
                 context=context,
-                notice="Delivery Note jarayoni bekor qilindi.",
+                notice="Chiqqan mahsulot hujjati jarayoni bekor qilindi.",
             )
             return
 
@@ -679,7 +711,7 @@ class DeliveryFlowMixin:
             if stage == "dn_item_rate":
                 current_item = draft.get("current_item") or {}
                 if not current_item:
-                    await query.answer("Item topilmadi.", show_alert=True)
+                    await query.answer("Buyum topilmadi.", show_alert=True)
                     return
                 qty = float(current_item.get("qty") or 0)
                 items = draft.get("items") or []
@@ -700,12 +732,12 @@ class DeliveryFlowMixin:
                 await query.answer("0 narx bilan qo'shildi.", show_alert=False)
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text="Item qo'shildi.",
+                    text="Buyum qo'shildi.",
                     reply_markup=self._delivery_cancel_markup(),
                 )
                 await self._prompt_delivery_items_menu(chat_id=chat_id, draft=draft, context=context)
                 return
-            await query.answer("Bu bosqichda Skip tugmasi mavjud emas.", show_alert=True)
+            await query.answer("Bu bosqichda o'tkazib yuborish tugmasi mavjud emas.", show_alert=True)
             return
 
         await query.answer("Noma'lum tanlov.", show_alert=True)
@@ -734,7 +766,7 @@ class DeliveryFlowMixin:
         await query.answer("Inline oynani oching.", show_alert=False)
         await context.bot.send_message(
             chat_id=chat_id,
-            text="Tasdiqlash yoki bekor qilish uchun Delivery Note qidiring.",
+            text="Tasdiqlash yoki bekor qilish uchun chiqqan mahsulot hujjatini qidiring.",
             reply_markup=InlineKeyboardMarkup(
                 [
                     [
@@ -760,7 +792,7 @@ class DeliveryFlowMixin:
         docname = (query.data or "").split(":", 1)[1:]
         docname = docname[0] if docname else ""
         if not docname:
-            await query.answer("Delivery Note aniqlanmadi.", show_alert=True)
+            await query.answer("Chiqqan mahsulot hujjati aniqlanmadi.", show_alert=True)
             return
         creds = self.storage.get_credentials(user.id)
         if not creds or creds.get("status") != "active":
@@ -798,7 +830,7 @@ class DeliveryFlowMixin:
         docname = (query.data or "").split(":", 1)[1:]
         docname = docname[0] if docname else ""
         if not docname:
-            await query.answer("Delivery Note aniqlanmadi.", show_alert=True)
+            await query.answer("Chiqqan mahsulot hujjati aniqlanmadi.", show_alert=True)
             return
         creds = self.storage.get_credentials(user.id)
         if not creds or creds.get("status") != "active":
@@ -836,7 +868,7 @@ class DeliveryFlowMixin:
         docname = (query.data or "").split(":", 1)[1:]
         docname = docname[0] if docname else ""
         if not docname:
-            await query.answer("Delivery Note aniqlanmadi.", show_alert=True)
+            await query.answer("Chiqqan mahsulot hujjati aniqlanmadi.", show_alert=True)
             return
         creds = self.storage.get_credentials(user.id)
         if not creds or creds.get("status") != "active":
@@ -861,6 +893,22 @@ class DeliveryFlowMixin:
                 text=f"O'chirishda xatolik:\n{fallback}",
             )
 
+    async def handle_delivery_dismiss_action(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        query = update.callback_query
+        if not query:
+            return
+        docname = (query.data or "").split(":", 1)
+        docname = docname[1] if len(docname) == 2 else ""
+        await query.answer("Saqlab qo'yildi.", show_alert=False)
+        if query.message:
+            await query.edit_message_reply_markup(reply_markup=None)
+        await context.bot.send_message(
+            chat_id=query.message.chat_id if query.message else query.from_user.id,
+            text=f"📁 {docname or 'Chiqqan mahsulot hujjati'} draft holatida saqlanmoqda.",
+        )
+
     # -------------------------------------------------------------- previews
     async def _send_delivery_preview(
         self,
@@ -869,20 +917,23 @@ class DeliveryFlowMixin:
         api_key: str,
         api_secret: str,
         context: ContextTypes.DEFAULT_TYPE,
+        show_message: bool = True,
     ) -> None:
+        if not show_message:
+            return
         success, error_detail, rows = await self._fetch_delivery_notes(
             api_key,
             api_secret,
             query="",
         )
         if not success:
-            text = "Delivery Note ro'yxatini olishda xatolik yuz berdi."
+            text = "Chiqqan mahsulot hujjatlari ro'yxatini olishda xatolik yuz berdi."
             if error_detail:
                 text += f"\nMa'lumot: {error_detail}"
             await context.bot.send_message(chat_id=chat_id, text=text)
             return
         if not rows:
-            await context.bot.send_message(chat_id=chat_id, text="Hozircha Delivery Note topilmadi.")
+            await context.bot.send_message(chat_id=chat_id, text="Hozircha chiqqan mahsulot hujjati topilmadi.")
             return
         preview = rows[:5]
         lines = []
@@ -894,7 +945,7 @@ class DeliveryFlowMixin:
             status = self._docstatus_label(row.get("docstatus"))
             lines.append(f"• {name} — {customer} ({posting_date} {posting_time}) — {status}")
         if len(rows) > len(preview):
-            lines.append(f"... yana {len(rows) - len(preview)} ta Delivery Note inline menyuda mavjud.")
+            lines.append(f"... yana {len(rows) - len(preview)} ta chiqqan mahsulot hujjati inline menyuda mavjud.")
         await context.bot.send_message(chat_id=chat_id, text="\n".join(lines))
 
     # -------------------------------------------------------------- ERP calls
@@ -940,7 +991,7 @@ class DeliveryFlowMixin:
             try:
                 payload = response.json()
             except ValueError:
-                return False, "Delivery Note javobini o'qib bo'lmadi.", []
+                return False, "Chiqqan mahsulot hujjatlari javobini o'qib bo'lmadi.", []
             data = payload.get("data") if isinstance(payload, dict) else payload
             if not isinstance(data, list):
                 data = []
@@ -949,7 +1000,7 @@ class DeliveryFlowMixin:
         try:
             return await asyncio.to_thread(_request)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Delivery Note ro'yxatini olishda xatolik: %s", exc)
+            logger.warning("Chiqqan mahsulot hujjatlari ro'yxatini olishda xatolik: %s", exc)
             return False, str(exc), []
 
     async def _fetch_customers(
@@ -1022,16 +1073,16 @@ class DeliveryFlowMixin:
             try:
                 payload = response.json()
             except ValueError:
-                return False, "Delivery Note ma'lumotini o'qib bo'lmadi.", {}
+                return False, "Chiqqan mahsulot hujjati ma'lumotini o'qib bo'lmadi.", {}
             data = payload.get("data") if isinstance(payload, dict) else payload
             if not isinstance(data, dict):
-                return False, "Delivery Note ma'lumotlari topilmadi.", {}
+                return False, "Chiqqan mahsulot hujjati ma'lumotlari topilmadi.", {}
             return True, None, data
 
         try:
             return await asyncio.to_thread(_request)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Delivery Note tafsilotlarini olishda xatolik: %s", exc)
+            logger.warning("Chiqqan mahsulot hujjati tafsilotlarini olishda xatolik: %s", exc)
             return False, str(exc), {}
 
     async def _create_delivery_note(
@@ -1182,7 +1233,7 @@ class DeliveryFlowMixin:
         )
         total = detail.get("grand_total") or summary.get("grand_total") or "-"
         lines = [
-            f"🚚 Delivery Note: {name}",
+            f"🚚 Chiqqan mahsulot hujjati: {name}",
             f"Mijoz: {customer}",
             f"Sana: {posting_date} {posting_time}",
             f"Ombor: {warehouse}",
@@ -1198,7 +1249,7 @@ class DeliveryFlowMixin:
                     f"• {item.get('item_code')} {item.get('item_name') or ''} — {item.get('qty')} {item.get('uom')} (Narx: {item.get('rate')})"
                 )
             if len(items) > max_items:
-                lines.append(f"... va yana {len(items) - max_items} ta item")
+                lines.append(f"... va yana {len(items) - max_items} ta buyum")
         return "\n".join(lines)
 
     def _delivery_action_buttons(self, detail: Dict[str, Any]) -> Optional[InlineKeyboardMarkup]:
@@ -1212,6 +1263,13 @@ class DeliveryFlowMixin:
                 [
                     InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"{DELIVERY_APPROVE_PREFIX}:{docname}"),
                     InlineKeyboardButton("🗑️ O'chirish", callback_data=f"{DELIVERY_DELETE_PREFIX}:{docname}"),
+                ]
+            )
+            buttons.append(
+                [
+                    InlineKeyboardButton(
+                        "📁 Saqlab chiqish", callback_data=f"{DELIVERY_DISMISS_PREFIX}:{docname}"
+                    )
                 ]
             )
         elif docstatus == 1:
